@@ -16,7 +16,7 @@ TouchScreen ts = TouchScreen(8, A3, A2, 9, 300);
 #define	BLACK   0x0000
 #define	BLUE    0x001F
 #define	RED     0xF800
-#define	GREEN   0x07E0
+#define	GREEN   0x03E0
 #define CYAN    0x07FF
 #define MAGENTA 0xF81F
 #define YELLOW  0xFFE0
@@ -34,17 +34,18 @@ uint16_t gradient[8] = {0xA1CB, 0x91AC, 0x798C, 0x694B, 0x592A, 0x40E8, 0x28A6, 
 //  initialize buttons
 Elegoo_GFX_Button listButtons[6];
 
-//  make these the same size - original list is kept
-const int LIST_SIZE = 8;
-//char listOriginal[8][32] = {"Test List","One", "Two", "Three", "Four", "Five", "Six", "%END"};
-char listOriginal[LIST_SIZE][32] = {"Chores", "Get clean shirt/pants/underwear", "Change clothes", "", "Chairs", "Ocelots", "Eat Beets", "Eat non-Beets"};
+//  make these the same size, original list is kept. Title should be =< 16 chars
+const int LIST_SIZE = 12;
+//char listOriginal[8][32] = {"Test List","One", "Two", "Three", "Four", "Five", "01234567890123456789012345678901", "%END"};
+char listOriginal[LIST_SIZE][32] = {"Jasmine - Morning Routine", "Out of bed :(", "Get clean shirt/pants/underwear", "Change clothes", "Eat Breakfast", "Brush Teeth", "Take Medicine", "Brush Hair", "Put on socks", "Check backpack - homework?", "Put on shoes", "Get out the door"};
 char listButtonLabels[LIST_SIZE][32];
 
-uint8_t pressed;
+bool timeout;
+uint8_t pressed = 1;
+uint8_t pressedLast = 1;
 uint8_t pressDuration;
 uint8_t discreteDuration;
 uint8_t prevDiscreteDuration;
-uint8_t remainingItems;
 
 #define GRADIENT_SIZE (sizeof(gradient)/sizeof(gradient[0]))
 //#define LIST_SIZE (sizeof(listOriginal)/sizeof(listOriginal[0]))
@@ -63,37 +64,95 @@ uint8_t remainingItems;
 
 //  define a button
 void initButton(uint8_t row, uint16_t outlineColor, uint16_t fillColor, uint16_t textColor, char text[32]) {
-  //  draw buttons black when at the end of the array
+  //  draw buttons black when at the end of the list
   if (listButtonLabels[row][0] == NULL) {
     outlineColor = BLACK;
     fillColor = BLACK;
     textColor = BLACK;
   }
   listButtons[row].initButton(&tft, BUTTON_X, BUTTON_Y + row * (BUTTON_H + BUTTON_SPACING_Y),
-                              BUTTON_W, BUTTON_H, outlineColor, fillColor, textColor, text, BUTTON_TEXTSIZE);
+                              //                              BUTTON_W, BUTTON_H, outlineColor, fillColor, textColor, text, BUTTON_TEXTSIZE);
+                              BUTTON_W, BUTTON_H, outlineColor, fillColor, textColor, " ", BUTTON_TEXTSIZE);
 }
 
-void refreshButtons(void) {
-  for (uint8_t row = 1; row < 6; row++) {
-    initButton(row, WHITE, gradient[0], WHITE, listButtonLabels[row]);
-    listButtons[row].drawButton();
-    Serial.println(listButtonLabels[row]);
+void drawText(uint8_t button = 0, uint16_t color = WHITE) {
+  // set text to size 1 if length > 16, re-center
+  if (strlen(listButtonLabels[button]) > 16) {
+    if (button == 0) {
+      tft.setCursor(21, 24);
+    } else {
+      tft.setCursor(21, button * (BUTTON_SPACING_Y + BUTTON_H) + 28);
+    }
+    tft.setTextSize(1);
+    tft.setTextColor(color);
+  } else {
+    tft.setCursor(21, button * (BUTTON_SPACING_Y + BUTTON_H) + 23);
+    tft.setTextSize(2);
+  }
+  tft.setTextColor(color);
+  tft.print(listButtonLabels[button]);
+}
+
+void progressBar() {
+  //check number of remaining items
+  uint8_t progress = 0;
+  for (uint8_t i = 0; i < LIST_SIZE; i++) {
+    if (listButtonLabels[i][0] == NULL) {
+      progress++;
+    }
+  }
+  // compare against LIST_SIZE to determine progress
+  
+  if (progress == 0) {
+    tft.fillRoundRect(8, 8, 224, 38, 8, RED);
+    tft.drawRoundRect(8, 8, 224, 38, 8, WHITE);
+    drawText();
+  } else {
+    tft.fillRoundRect(8, 8, 224, 38, 8, RED);
+    tft.fillRoundRect(8, 8, progress*(244/LIST_SIZE), 38, 8, GREEN);
+    tft.drawRoundRect(8, 8, 224, 38, 8, WHITE);
+    drawText();
+  }
+}
+
+void refreshButtons(uint8_t button = 1, bool reinitialize = 0, bool multi = 0) {
+  // refresh the button and all buttons after
+  if (multi) {
+    for (uint8_t i = button; i < 6; i++) {
+      if (reinitialize) {
+        initButton(i, WHITE, gradient[0], WHITE, " ");
+      }
+      if (i > 0) {
+        listButtons[i].drawButton();
+      }
+      drawText(i);
+    }
+  } else {
+    // refresh a single button
+    if (reinitialize) {
+      initButton(button, WHITE, gradient[0], WHITE, " ");
+    }
+    if (button > 0) {
+      listButtons[button].drawButton();
+    }
+    drawText(button);
   }
 }
 
 void removeItem(char list[LIST_SIZE][32], int n) {
-  if (n > 0 && n < 6) {
-    for (int i = n; i < LIST_SIZE; i++) {
-      if (i == LIST_SIZE - 1) {
-        list[i][0] = NULL;
-      } else {
-        for (int j = 0; j < 32; j++) {
-          list[i][j] = list[i + 1][j];
-        }
+  for (int i = n; i < LIST_SIZE; i++) {
+    if (i == LIST_SIZE - 1) {
+      list[i][0] = NULL;
+    } else {
+      for (int j = 0; j < 32; j++) {
+        list[i][j] = list[i + 1][j];
       }
     }
   }
+  progressBar();
 }
+
+
 
 /******
   Initial Setup
@@ -107,18 +166,13 @@ void setup(void) {
   tft.fillScreen(BLACK);
 
   // copy list from original to initialize it
-  remainingItems = LIST_SIZE;
   for (uint8_t i = 0; i < LIST_SIZE; i++) {
     for (uint8_t j = 0; j < 32; j++) {
       listButtonLabels[i][j] = listOriginal[i][j];
     }
   }
-
-  // draw buttons, skip top button
-  refreshButtons();
-
-  tft.fillRoundRect(8, 8, 224, 38, 8, RED);
-  tft.drawRoundRect(8, 8, 224, 38, 8, WHITE);
+  progressBar();
+  refreshButtons(0, 1, 1);
 }
 
 
@@ -136,52 +190,42 @@ void loop(void) {
   if (listButtonLabels[1][0] == NULL) {
     //all done - victory screen & reset
     tft.fillScreen(WHITE);
-    tft.fillScreen(BLACK);
-    tft.fillScreen(WHITE);
-    tft.fillScreen(BLACK);
-    delay(1000);
     setup();
   }
 
   if (p.z > 100 && p.z < 1000) {
     p.x = map(p.x, TS_MINX, TS_MAXX, tft.width(), 0);
     p.y = (tft.height() - map(p.y, TS_MINY, TS_MAXY, tft.height(), 0));
-    if (pressed > 0) {
-      listButtons[pressed].drawButton();
+
+    if (pressed > 0  && prevDiscreteDuration != discreteDuration) {
+      refreshButtons(pressed);
     }
   } else {
+
     if (listButtons[pressed].justReleased()) {
+      refreshButtons(pressed, 1);
       pressed = 0;
-      refreshButtons();
     } else {
       pressDuration = 0;
-    }
-    if (pressed > 0 && prevDiscreteDuration != discreteDuration) {
-      listButtons[pressed].drawButton();
     }
   }
 
   prevDiscreteDuration = discreteDuration;
   discreteDuration = map(pressDuration, 0, 8, 0, GRADIENT_SIZE);
 
-  //Serial.print(pressed);Serial.print(" @ ");Serial.println(listButtonLabels[pressed]);
-
+  // if held for the specified duration
   if (discreteDuration > 8) {
-    // Make thing fall off list
+    // item falls off list
     removeItem(listButtonLabels, pressed);
+    refreshButtons(pressed, 1, 1);
     discreteDuration = 0;
     pressDuration = 0;
-
-  } else if (discreteDuration > 0) {
-    if (pressDuration > 8) {
-      initButton(pressed, WHITE, gradient[0], WHITE, listButtonLabels[pressed]);
-    } else {
-      initButton(pressed, WHITE, gradient[discreteDuration - 1], WHITE, listButtonLabels[pressed]);
-    }
+  } else if (discreteDuration > 1) {
+    // otherwise increase its position on the gradient
+    initButton(pressed, WHITE, gradient[discreteDuration - 1], WHITE, " ");
   }
-  //      tft.fillCircle(p.x, p.y, 4, BLUE);
 
-  // push button, do thing
+  // determine whether a button is pressed or not using contains
   for (uint8_t row = 0; row < 6; row++) {
     if (listButtons[row].contains(p.x, p.y)) {
       listButtons[row].press(true);
@@ -191,11 +235,11 @@ void loop(void) {
       } else {
         pressDuration++;
       }
-      //Serial.print(pressed); Serial.print(" ][ "); Serial.print(pressDuration); Serial.print(" ][ "); Serial.println(discreteDuration);
     } else {
       listButtons[row].press(false);
     }
   }
+
   // global delay to reduce input/graphical jitter
   delay(40);
 }
